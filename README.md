@@ -1,6 +1,5 @@
 # Thresholded Constrained Knowledge Gradient (TCKG)
 
-
 ## Thresholded feasible region
 
 TCKG defines a **thresholded feasible region**:
@@ -54,7 +53,6 @@ V_{n+1}(\tau)
 - V_n(\tau)
 $$
 
-
 For minimization, the sign is reversed: $\alpha_{\text{TCKG}} = V_n - \mathbb{E}[V_{n+1}]$.
 
 The expectation is approximated via Monte Carlo sampling (“fantasy” GP updates)
@@ -82,7 +80,7 @@ of the GP posteriors conditioned on a synthetic observation at $x_c$.
 
 ---
 
-## 7. Intuition
+## Intuition
 
 - $V_n(\tau)$ measures the best *posterior mean* in the currently feasible region.
 - After sampling at $x_c$, the posterior changes, potentially improving:
@@ -92,7 +90,7 @@ of the GP posteriors conditioned on a synthetic observation at $x_c$.
 
 ---
 
-## 8. Conceptual comparison
+## Conceptual comparison
 
 | Method | Feasibility handling | Objective measure |
 |:--|:--|:--|
