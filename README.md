@@ -45,16 +45,15 @@ is the thresholded feasible set after the hypothetical new observation.
 Then, the **Thresholded Constrained Knowledge Gradient** acquisition function is defined as:
 
 $$
-
 \alpha_{\text{TCKG}}(x_c)
 = 
 \mathbb{E}_{y_f, y_c \mid D_n}
 \!\left[
 V_{n+1}(\tau)
 \right]
-- V_n(\tau).
-
+- V_n(\tau)
 $$
+
 
 For minimization, the sign is reversed: $\alpha_{\text{TCKG}} = V_n - \mathbb{E}[V_{n+1}]$.
 
@@ -71,11 +70,11 @@ $$
 \alpha_{\text{TCKG}}(x_c)
 \approx
 \frac{1}{M} \sum_{m=1}^{M}
-
+\Big[
 \max_{x \in \mathcal{F}_{n+1}^{(m)}(\tau)} \mu^{f,(m)}_{n+1}(x)
-
+\Big]
 -
-\max_{x \in \mathcal{F}_n(\tau)} \mu^f_n(x),
+\max_{x \in \mathcal{F}_n(\tau)} \mu^f_n(x)
 $$
 
 where each Monte Carlo sample $m$ corresponds to a fantasy update
