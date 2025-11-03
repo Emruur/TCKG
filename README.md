@@ -44,13 +44,7 @@ is the thresholded feasible set after the hypothetical new observation.
 Then, the **Thresholded Constrained Knowledge Gradient** acquisition function is defined as:
 
 $$
-\alpha_{\text{TCKG}}(x_c)
-= 
-\mathbb{E}_{y_f, y_c \mid D_n}
-\!
-V_{n+1}(\tau)
-
-- V_n(\tau)
+\alpha_{\text{TCKG}}(x_c)= \mathbb{E}_{y_f, y_c \mid D_n}\!V_{n+1}(\tau)- V_n(\tau)
 $$
 
 For minimization, the sign is reversed: $\alpha_{\text{TCKG}} = V_n - \mathbb{E}[V_{n+1}]$.
