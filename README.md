@@ -47,9 +47,9 @@ $$
 \alpha_{\text{TCKG}}(x_c)
 = 
 \mathbb{E}_{y_f, y_c \mid D_n}
-\!\left[
+\!
 V_{n+1}(\tau)
-\right]
+
 - V_n(\tau)
 $$
 
