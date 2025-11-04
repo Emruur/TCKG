@@ -403,7 +403,7 @@ def constraint_ring(X):
     return (X[:, 0] - 0.5)**2 + (X[:, 1] - 0.5)**2 - 0.15**2
 
 
-def run_experiments_with_acq(acq_type="tckg",problem ,n_runs=10, seed_base=31, visualize= True):
+def run_experiments_with_acq(problem, acq_type="tckg" ,n_runs=10, seed_base=31, visualize= True):
     
     obj, cons = BENCHMARKS[problem]
     cons = expand_constraints(cons)
@@ -479,7 +479,7 @@ def run_experiments_with_acq(acq_type="tckg",problem ,n_runs=10, seed_base=31, v
 
 
 
-def conduct_experiment(problem, n_runs= 10):
+def conduct_experiment(problem, n_runs=10):
     os.makedirs(problem, exist_ok=True)
     mean_tckg, std_tckg, _ = run_experiments_with_acq("tckg", n_runs=n_runs, problem= problem)
     mean_cei, std_cei, _ = run_experiments_with_acq("cei", n_runs=n_runs, problem= problem)
