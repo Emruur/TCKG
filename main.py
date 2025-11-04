@@ -481,9 +481,9 @@ def run_experiments_with_acq(problem, acq_type="tckg" ,n_runs=10, seed_base=31, 
 
 def conduct_experiment(problem, n_runs=10):
     os.makedirs(problem, exist_ok=True)
-    mean_tckg, std_tckg, _ = run_experiments_with_acq("tckg", n_runs=n_runs, problem= problem)
-    mean_cei, std_cei, _ = run_experiments_with_acq("cei", n_runs=n_runs, problem= problem)
-    mean_rand, std_rand, _ = run_experiments_with_acq("random", n_runs=n_runs, problem= problem)
+    mean_tckg, std_tckg, _ = run_experiments_with_acq(acq_type="tckg", n_runs=n_runs, problem= problem)
+    mean_cei, std_cei, _ = run_experiments_with_acq(acq_type="cei", n_runs=n_runs, problem= problem)
+    mean_rand, std_rand, _ = run_experiments_with_acq(acq_type="random", n_runs=n_runs, problem= problem)
 
     steps = np.arange(1, len(mean_tckg) + 1)
     plt.figure(figsize=(8, 5))
