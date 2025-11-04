@@ -403,7 +403,7 @@ def constraint_ring(X):
     return (X[:, 0] - 0.5)**2 + (X[:, 1] - 0.5)**2 - 0.15**2
 
 
-def run_experiments_with_acq(acq_type="tckg",problem="ackley3_shell" ,n_runs=10, seed_base=31, visualize= True):
+def run_experiments_with_acq(acq_type="tckg",problem ,n_runs=10, seed_base=31, visualize= True):
     
     obj, cons = BENCHMARKS[problem]
     cons = expand_constraints(cons)
@@ -479,9 +479,8 @@ def run_experiments_with_acq(acq_type="tckg",problem="ackley3_shell" ,n_runs=10,
 
 
 
-def conduct_experiment(problem="branin_wavy", n_runs= 10):
+def conduct_experiment(problem, n_runs= 10):
     os.makedirs(problem, exist_ok=True)
-    problem= "branin_wavy"
     mean_tckg, std_tckg, _ = run_experiments_with_acq("tckg", n_runs=n_runs, problem= problem)
     mean_cei, std_cei, _ = run_experiments_with_acq("cei", n_runs=n_runs, problem= problem)
     mean_rand, std_rand, _ = run_experiments_with_acq("random", n_runs=n_runs, problem= problem)
@@ -508,10 +507,9 @@ def conduct_experiment(problem="branin_wavy", n_runs= 10):
 
 
 if __name__ == "__main__":
-    #conduct_experiment(problem="branian_wavy", n_runs=10)
+    conduct_experiment(problem="branin_wavy", n_runs=10)
     conduct_experiment(problem="sixhump_wedge", n_runs=10)
     conduct_experiment(problem="goldstein_tiltedellipse", n_runs=10)
-    conduct_experiment(problem="branin_easy_circle", n_runs=10)
     conduct_experiment(problem="branin_easy_circle", n_runs=10)
     conduct_experiment(problem="goldstein_annulus", n_runs=10)
     
