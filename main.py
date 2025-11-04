@@ -508,5 +508,7 @@ def conduct_experiment(problem="branin_wavy", n_runs= 10):
 
 
 if __name__ == "__main__":
-    conduct_experiment(problem="branian_wavy", n_runs=2)
-    conduct_experiment(problem="sixhump_wedge", n_runs=2)
+    conduct_experiment(problem="branian_wavy", n_runs=10)
+    conduct_experiment(problem="sixhump_wedge", n_runs=10)
+    conduct_experiment(problem="goldstein_tiltedellipse", n_runs=10)
+    conduct_experiment(problem="branin_easy_circle", n_runs=10)
