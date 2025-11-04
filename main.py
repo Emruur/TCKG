@@ -4,8 +4,9 @@ from scipy.stats import norm
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C
 import os
-# -------------------------------------------------------------
-from scipy.stats import qmc  # <-- add this import at the top
+from scipy.stats import qmc
+
+from benchmarks import BENCHMARKS, expand_constraints
 
 # -------------------------------------------------------------
 # Thresholded Constrained Knowledge Gradient acquisition
@@ -402,7 +403,10 @@ def constraint_ring(X):
     return (X[:, 0] - 0.5)**2 + (X[:, 1] - 0.5)**2 - 0.15**2
 
 
-def run_experiments_with_acq(acq_type="tckg", n_runs=10, seed_base=31, visualize= True):
+def run_experiments_with_acq(acq_type="tckg",problem="ackley3_shell" ,n_runs=10, seed_base=31, visualize= True):
+    
+    obj, cons = BENCHMARKS[problem]
+    cons = expand_constraints(cons)
     all_progress = []
 
     for run in range(n_runs):
@@ -410,7 +414,7 @@ def run_experiments_with_acq(acq_type="tckg", n_runs=10, seed_base=31, visualize
         print(f"  {acq_type.upper()} RUN {run + 1}/{n_runs}")
         print(f"==============================")
 
-        bo = BayesianOptimizer(branin_2d, [constraint_ring],
+        bo = BayesianOptimizer(obj, cons,
                                n_steps=15, init_points=5, m_mc=15, tau=0.5, seed=run)
 
         for step in range(bo.n_steps):
@@ -435,7 +439,7 @@ def run_experiments_with_acq(acq_type="tckg", n_runs=10, seed_base=31, visualize
             
             # Visualization (optional)
             if visualize and acq_type == "tckg":
-                bo._visualize(gp_obj, gp_cons, acq_values, x_next, step, "experiment/experiment_"+acq_type+"_"+str(run))
+                bo._visualize(gp_obj, gp_cons, acq_values, x_next, step, problem+"/experiment_"+acq_type+"_"+str(run))
 
             y_next = bo.func(x_next)
             yc_next = [con(x_next) for con in bo.constraints]
@@ -475,16 +479,12 @@ def run_experiments_with_acq(acq_type="tckg", n_runs=10, seed_base=31, visualize
 
 
 
-# ==============================================================
-# Run multiple experiments and show mean/std progress
-# ==============================================================
-
-if __name__ == "__main__":
-    os.makedirs("experiment", exist_ok=True)
-
-    mean_tckg, std_tckg, _ = run_experiments_with_acq("tckg", n_runs=10)
-    mean_cei, std_cei, _ = run_experiments_with_acq("cei", n_runs=10)
-    mean_rand, std_rand, _ = run_experiments_with_acq("random", n_runs=10)
+def conduct_experiment(problem="branin_wavy", n_runs= 10):
+    os.makedirs(problem, exist_ok=True)
+    problem= "branin_wavy"
+    mean_tckg, std_tckg, _ = run_experiments_with_acq("tckg", n_runs=n_runs, problem= problem)
+    mean_cei, std_cei, _ = run_experiments_with_acq("cei", n_runs=n_runs, problem= problem)
+    mean_rand, std_rand, _ = run_experiments_with_acq("random", n_runs=n_runs, problem= problem)
 
     steps = np.arange(1, len(mean_tckg) + 1)
     plt.figure(figsize=(8, 5))
@@ -503,6 +503,10 @@ if __name__ == "__main__":
     plt.legend()
     plt.grid(True, linestyle="--", alpha=0.5)
     plt.tight_layout()
-    plt.savefig("experiment/cei_vs_tckg_vs_random.png", dpi=150)
-    plt.show()
+    plt.savefig(problem+"/cei_vs_tckg_vs_random.png", dpi=150)
 
+
+
+if __name__ == "__main__":
+    conduct_experiment(problem="branian_wavy", n_runs=2)
+    conduct_experiment(problem="sixhump_wedge", n_runs=2)
