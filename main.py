@@ -60,7 +60,7 @@ def conduct_comparison_experiment(problem, n_runs=10, dim=2):
     print(f"Feasible minimum for {problem}: f(x*) = {feasible_y:.5f} at {feasible_x}")
 
     # === Step 2: Run experiments for all acq types ===
-    acq_types = ["cei", "random"]
+    acq_types = ["cei"]
     for acq in acq_types:
         mean_raw, std_raw, all_runs = run_experiment(problem ,acq_type=acq, n_runs=n_runs, visualize= True ,dim=dim)
 
