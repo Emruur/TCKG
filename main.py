@@ -25,7 +25,7 @@ def run_experiment(problem, acq_type="cei" ,n_runs=1, visualize= True, dim= 2):
 
         bo = BayesianOptimizer(obj, cons, problem,
                                n_steps=n_steps, init_points=init_points, m_mc=15, tau=0.5, seed=run, dim=dim)
-        progress= bo.run(visualize= visualize)
+        progress= bo.run(visualize= visualize, acq_type= acq_type)
         
         all_progress.append(progress)
 
@@ -60,7 +60,7 @@ def conduct_comparison_experiment(problem, n_runs=10, dim=2):
     print(f"Feasible minimum for {problem}: f(x*) = {feasible_y:.5f} at {feasible_x}")
 
     # === Step 2: Run experiments for all acq types ===
-    acq_types = ["cei"]
+    acq_types = ["cei","scei"]
     for acq in acq_types:
         mean_raw, std_raw, all_runs = run_experiment(problem ,acq_type=acq, n_runs=n_runs, visualize= True ,dim=dim)
 
@@ -121,7 +121,7 @@ def conduct_comparison_experiment(problem, n_runs=10, dim=2):
     plt.savefig(os.path.join(problem, f"{problem}_regret_asym_std.png"), dpi=150)
 
 
-conduct_comparison_experiment("branin_easy_circle", n_runs=2)
+conduct_comparison_experiment("branin_easy_circle", n_runs=3)
 
 
 

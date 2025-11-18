@@ -4,7 +4,7 @@ from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C
 from sklearn.gaussian_process import GaussianProcessRegressor
 import os
 
-from AcquisitionFunctions import ConstrainedEI
+from AcquisitionFunctions import ConstrainedEI, SigmoidConstrainedEI
 import matplotlib.pyplot as plt
 
 class BayesianOptimizer:
@@ -62,6 +62,7 @@ class BayesianOptimizer:
 
     # --- GP fit helper ---
     def _fit_gp(self, X, y):
+        # TODO why am i buggy (convergence error)
         kernel = C(1.0, (1e-3, 10)) * RBF(length_scale=0.3,
                                           length_scale_bounds=(1e-2, 10))
         gp = GaussianProcessRegressor(kernel=kernel, alpha=1e-10,
@@ -220,8 +221,10 @@ class BayesianOptimizer:
                 acq = ConstrainedEI(gp_obj, gp_cons, tau=self.tau)
                 acq_values = acq.compute(self.candidates, best_feas)
                 x_next = self.candidates[np.argmax(acq_values)]
-            elif acq_type == "random":
-                x_next = self.candidates[np.random.randint(len(self.candidates))]
+            elif acq_type == "scei":
+                acq = SigmoidConstrainedEI(gp_obj, gp_cons, tau=self.tau)
+                acq_values = acq.compute(self.candidates, best_feas)
+                x_next = self.candidates[np.argmax(acq_values)]
             else:
                 raise ValueError(f"Unknown acq_type {acq_type}")
             
