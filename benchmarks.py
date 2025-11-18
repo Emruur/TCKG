@@ -154,41 +154,75 @@ def constraint_3d_sine_shell(X):
 # =========
 # Ready-made benchmark sets (pick one)
 # =========
+def branin_2d_max(X):
+    # Transformation: 0.397887 - f(X)
+    return 0.397887 - branin_2d(X)
 
-BENCHMARKS = {
-    # 2D classics
-    "branin_easy_circle":       (branin_2d,          [constraint_ring_center]),
-    "branin_wavy":              (branin_2d,          [constraint_wavy_band_2d]),
-    "sixhump_wedge":            (six_hump_camel_2d,  [constraint_linear_wedge]),
-    "goldstein_tiltedellipse":  (goldstein_price_2d, [constraint_tilted_ellipse]),
+def six_hump_camel_2d_max(X):
+    # Transformation: -1.0316 - f(X) = -(f(X) + 1.0316). We use +1.0316 + f(X) which is a simple sign flip.
+    return 1.0316 - six_hump_camel_2d(X) * -1.0
 
-    # 2D ring band (two constraints)
-    "goldstein_annulus":        (goldstein_price_2d, [lambda X: constraint_annulus(X)[0],
-                                                      lambda X: constraint_annulus(X)[1]]),
+def goldstein_price_2d_max(X):
+    # Transformation: 3.0 - f(X)
+    return 3.0 - goldstein_price_2d(X)
 
-    # 3D hard ones
-    "hartmann3_tunnel":         (hartmann_3d,        [constraint_3d_tunnel]),
-    "ackley3_shell":            (ackley_3d,          [lambda X: constraint_3d_sine_shell(X)[0],
-                                                      lambda X: constraint_3d_sine_shell(X)[1]]),
-    "rosenbrock3_tunnel":       (rosenbrock_3d,      [constraint_3d_tunnel]),
-    "levy3_shell":              (levy_3d,            [lambda X: constraint_3d_sine_shell(X)[0],
-                                                      lambda X: constraint_3d_sine_shell(X)[1]]),
-}
+def hartmann_3d_max(X):
+    # Transformation: -3.86278 - f(X) * -1 = 3.86278 + f(X)
+    return 3.86278 + hartmann_3d(X)
 
+def ackley_3d_max(X):
+    # Transformation: 0.0 - f(X)
+    return -ackley_3d(X)
 
-# Small helper to normalize constraints that may return a list
+def rosenbrock_3d_max(X):
+    # Transformation: 0.0 - f(X)
+    return -rosenbrock_3d(X)
+
+def levy_3d_max(X):
+    # Transformation: 0.0 - f(X)
+    return -levy_3d(X)
+
+# =========
+# Constraints g(x) ≤ 0 are feasible; X in [0,1]^d (Constraints remain the same)
+# =========
+# ... (all constraint functions are kept here) ...
+
+# Small helper to normalize constraints that may return a list (Keep this function)
 def expand_constraints(constraints):
     normed = []
     for con in constraints:
-        # some entries in BENCHMARKS are already expanded lists produced by *calling* a factory
         if callable(con):
             normed.append(con)
         else:
-            # a precomputed list of arrays/functions
             for g in con:
                 if callable(g):
                     normed.append(g)
                 else:
                     raise ValueError("Constraint list should contain callables.")
     return normed
+
+# =========
+# Ready-made benchmark sets (MAXIMIZATION)
+# =========
+
+BENCHMARKS = {
+    # 2D classics
+    "branin_easy_circle":       (branin_2d_max,          [constraint_ring_center]),
+    "branin_wavy":              (branin_2d_max,          [constraint_wavy_band_2d]),
+    "sixhump_wedge":            (six_hump_camel_2d_max,  [constraint_linear_wedge]),
+    "goldstein_tiltedellipse":  (goldstein_price_2d_max, [constraint_tilted_ellipse]),
+
+    # 2D ring band (two constraints)
+    "goldstein_annulus":        (goldstein_price_2d_max, [lambda X: constraint_annulus(X)[0],
+                                                          lambda X: constraint_annulus(X)[1]]),
+
+    # 3D hard ones
+    "hartmann3_tunnel":         (hartmann_3d_max,        [constraint_3d_tunnel]),
+    "ackley3_shell":            (ackley_3d_max,          [lambda X: constraint_3d_sine_shell(X)[0],
+                                                          lambda X: constraint_3d_sine_shell(X)[1]]),
+    "rosenbrock3_tunnel":       (rosenbrock_3d_max,      [constraint_3d_tunnel]),
+    "levy3_shell":              (levy_3d_max,            [lambda X: constraint_3d_sine_shell(X)[0],
+                                                          lambda X: constraint_3d_sine_shell(X)[1]]),
+}
+
 

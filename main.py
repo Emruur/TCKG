@@ -44,63 +44,109 @@ class ThresholdedConstrainedKG:
                   for mu, std in zip(mus_c, stds_c)]
         PF = np.prod(np.clip(PF_all, 1e-12, 1.0), axis=0)
         return PF
+    def soft_feasibility_gate(self, PF, tau=0.5, alpha=10.0):
+        """
+        Smoothly maps PF (probability of feasibility) into [0,1]
+        using a logistic gate centered at tau.
+
+        PF : float or np.ndarray in [0,1]
+        tau : feasibility threshold (default 0.5)
+        alpha : steepness parameter (larger => sharper threshold)
+        """
+        return 1.0 / (1.0 + np.exp(-alpha * (PF - tau)))
 
     # --- acquisition computation ---
-    def compute(self, X_grid, candidates):
-        print("computing")
+    def compute(self, X_grid, candidates, alpha=20.0):
+        """
+        Soft-Constraint Thresholded Constrained KG.
+        Uses a differentiable soft feasibility gate to avoid discontinuities.
+        """
+
         X_grid = np.atleast_2d(X_grid)
         candidates = np.atleast_2d(candidates)
 
+        # --- posterior for objective ---
         mu_y, std_y = self._posterior_mu_std(self.gp_obj, X_grid)
 
+        # --- posterior for constraints ---
         mus_c, stds_c = [], []
         for gp in self.gp_cons:
             mu_c, std_c = self._posterior_mu_std(gp, X_grid)
             mus_c.append(mu_c)
             stds_c.append(std_c)
 
-        PF_n = self.probability_of_feasibility(mus_c, stds_c)
-        feas_mask = PF_n >= self.tau
-        baseline = np.min(mu_y[feas_mask]) if np.any(feas_mask) else np.inf
+        # =====================================================
+        # 1) SOFT feasibility: sigma(alpha * (PF - tau))
+        # =====================================================
+        PF = self.probability_of_feasibility(mus_c, stds_c)
+        soft_PF = self.soft_feasibility_gate(PF)
 
+        # =====================================================
+        # 2) SOFT weighted baseline objective
+        #    f_tilde = PF_soft * mu_y
+        # =====================================================
+        f_tilde = soft_PF * mu_y
+        baseline = np.max(f_tilde)
+
+        # Monte Carlo samples
         Zy = self.rng.randn(self.M)
         Zc = [self.rng.randn(self.M) for _ in self.gp_cons]
+
         tckg = np.zeros(len(candidates))
 
-
+        # =====================================================
+        # Loop over candidates
+        # =====================================================
         for i, xc in enumerate(candidates):
 
+            # posterior covariance terms
             tilde_y = self._tilde_sigma(self.gp_obj, X_grid, xc, self.sigma_e2_obj)
-            tilde_cs = [self._tilde_sigma(gp_c, X_grid, xc, sig2)
-                        for gp_c, sig2 in zip(self.gp_cons, self.sigma_e2_cons)]
+            tilde_cs = [
+                self._tilde_sigma(gp_c, X_grid, xc, sig2)
+                for gp_c, sig2 in zip(self.gp_cons, self.sigma_e2_cons)
+            ]
+
             vals = []
 
-            stds_c_next = [np.sqrt(np.maximum(std_c**2 - tilde_c**2, 1e-12))
-                           for std_c, tilde_c in zip(stds_c, tilde_cs)]
+            # Precompute next stds for constraints
+            stds_c_next = [
+                np.sqrt(np.maximum(std_c**2 - tc**2, 1e-12))
+                for std_c, tc in zip(stds_c, tilde_cs)
+            ]
 
+            # =====================================================
+            # 3) MC ROLLOUT for KG
+            # =====================================================
             for m in range(self.M):
+
+                # updated objective
                 mu_y_next = mu_y + tilde_y * Zy[m]
-                mus_c_next = [mu_c + tilde_c * Zc_i[m]
-                              for mu_c, tilde_c, Zc_i in zip(mus_c, tilde_cs, Zc)]
+
+                # updated constraint means
+                mus_c_next = [
+                    mu_c + tc * Zc_i[m]
+                    for mu_c, tc, Zc_i in zip(mus_c, tilde_cs, Zc)
+                ]
+
+                # updated feasibility probability
                 PF_next = self.probability_of_feasibility(mus_c_next, stds_c_next)
-                feas_mask_next = PF_next >= self.tau
 
-                if np.any(feas_mask_next):
-                    vals.append(np.min(mu_y_next[feas_mask_next]))
-                else:
-                    vals.append(np.inf)
+                # SOFT feasibility at next step
+                soft_PF_next = soft_PF = self.soft_feasibility_gate(PF_next)
 
+                # SOFT next objective
+                f_tilde_next = soft_PF_next * mu_y_next
+
+                # The KG "future value"
+                vals.append(np.max(f_tilde_next))
+
+            # Expectation over MC rollouts
             vals = np.array(vals)
-            finite_vals = vals[np.isfinite(vals)]
-            if not np.isfinite(baseline) or len(finite_vals) == 0:
-                print("[WARN] No feasible baseline found — skipping acquisition update")
-                tckg[i] = 0.0  # fallback: no feasible region known yet
-            else:
-                tckg[i] = baseline - np.mean(finite_vals)
+            tckg[i] = np.mean(vals) - baseline
+
         return tckg
 
-
-# -------------------------------------------------------------
+    # -------------------------------------------------------------
 # -------------------------------------------------------------
 # Constrained Expected Improvement (CEI)
 # -------------------------------------------------------------
@@ -243,17 +289,31 @@ class BayesianOptimizer:
             axes[0, 1].set_xlim(0, 1)
             axes[0, 1].set_title("Objective GP Posterior ±2σ")
 
-            # (3) Constraint GP
-            axes[1, 0].plot(X_plot, true_c, "k", label="True c(x)")
-            axes[1, 0].plot(X_plot, mu_c, color="tab:red", label="GP mean")
-            axes[1, 0].fill_between(X_plot.ravel(), mu_c - 2 * std_c, mu_c + 2 * std_c,
-                                    color="tab:red", alpha=0.2)
-            axes[1, 0].axhline(0, color="gray", lw=1, linestyle="--")
-            axes[1, 0].scatter(self.X_train, self.yc_trains[0], color="black", s=15)
-            axes[1, 0].axvline(x_next, color="red", linestyle="--")
-            axes[1, 0].set_xlim(0, 1)
-            axes[1, 0].set_title("Constraint GP Posterior ±2σ")
-            axes[1, 0].legend()
+            # (3) Probability of Feasibility (PF)
+            # Compute PF(x) on the grid
+            mus_c_grid = []
+            stds_c_grid = []
+            for gp in gpr_cons:
+                mu_c_g, std_c_g = gp.predict(self.X_grid, return_std=True)
+                mus_c_grid.append(mu_c_g)
+                stds_c_grid.append(std_c_g)
+
+            # PF = product_i Phi(-(mu_ci / std_ci))
+            PF_grid = np.ones(len(self.X_grid))
+            from scipy.stats import norm
+            for mu_c_g, std_c_g in zip(mus_c_grid, stds_c_grid):
+                PF_grid *= norm.cdf(-mu_c_g / (std_c_g + 1e-12))
+
+            # reshape for contour plot
+            PF_map = PF_grid.reshape(n, n)
+
+            # Visualize PF
+            im3 = axes[1, 0].contourf(X1, X2, PF_map, 30, cmap="viridis")
+            axes[1, 0].contour(X1, X2, PF_map, levels=[self.tau], colors="red", linewidths=2)
+            axes[1, 0].scatter(self.X_train[:, 0], self.X_train[:, 1], color="white", s=20)
+            axes[1, 0].set_title("Probability of Feasibility (PF)")
+            plt.colorbar(im3, ax=axes[1, 0])
+
 
             # (4) Acquisition function
             axes[1, 1].plot(self.candidates, acq_values, color="tab:green")
@@ -359,7 +419,7 @@ class BayesianOptimizer:
             # === Compute best feasible sample so far ===
             feas_mask = np.all(np.vstack(self.yc_trains) <= 0, axis=0)
             if np.any(feas_mask):
-                best_feas = np.min(self.y_train[feas_mask])
+                best_feas = np.max(self.y_train[feas_mask])
             else:
                 best_feas = np.inf  # no feasible yet
 
@@ -372,51 +432,6 @@ class BayesianOptimizer:
                 print("[Progress] No feasible sample yet.")
 
         print("\nOptimization finished.")
-
-# ==============================================================
-# 1. Toy Function and Constraint
-# ==============================================================
-
-def f(x):
-        x = np.asarray(x, dtype=float)
-        return -1*(
-            0.6 * np.sin(2 * np.pi * x)
-            + 0.3 * np.sin(8 * np.pi * x + 0.3)
-            + 0.25 * np.cos(14 * np.pi * (x + 0.2))
-            + 0.2 * np.sin(30 * np.pi * x ** 1.2 + 0.5)
-            + 0.15 * np.cos(50 * np.pi * (x ** 1.1 + 0.1))
-            + 0.45 * np.exp(-60 * (x - 0.22) ** 2)
-            - 0.4 * np.exp(-80 * (x - 0.78) ** 2)
-            + 0.25 * np.exp(-200 * (x - 0.55) ** 4)
-            - 0.15 * np.exp(-150 * (x - 0.9) ** 6)
-            + 0.1 * x ** 2 - 0.05 * x ** 3
-        )
-
-
-def c1(x):
-        x = np.asarray(x, dtype=float)
-        return 0.3 * np.sin(6 * np.pi * (x - 0.2)) + 0.1 * np.cos(3 * np.pi * (x - 0.2)) - 0.05
-    
-
-def branin_2d(X):
-    """Normalized 2D Branin function in [0,1]^2 domain."""
-    X = np.atleast_2d(X)
-    x1 = X[:, 0] * 15 - 5      # map [0,1] -> [-5,10]
-    x2 = X[:, 1] * 15          # map [0,1] -> [0,15]
-    a = 1.0
-    b = 5.1 / (4 * np.pi**2)
-    c = 5 / np.pi
-    r = 6
-    s = 10
-    t = 1 / (8 * np.pi)
-    y = a * (x2 - b * x1**2 + c * x1 - r)**2 + s * (1 - t) * np.cos(x1) + s
-    return y.reshape(-1, 1)
-
-def constraint_ring(X):
-    """Feasible if inside a ring around (0.5,0.5)."""
-    X = np.atleast_2d(X)
-    return (X[:, 0] - 0.5)**2 + (X[:, 1] - 0.5)**2 - 0.15**2
-
 
 def run_experiments_with_acq(problem, acq_type="tckg" ,n_runs=10, seed_base=31, visualize= True, dim= 2):
     
@@ -502,14 +517,14 @@ def run_experiments_with_acq(problem, acq_type="tckg" ,n_runs=10, seed_base=31, 
 
 
 
-def find_feasible_minimum(problem, dim):
+def find_feasible_maximum(problem, dim):
     """Find feasible minimum for a benchmark using constrained optimization."""
     func, cons_fns = BENCHMARKS[problem]
     cons_fns = expand_constraints(cons_fns)
 
     # Objective wrapper
     def obj(x):
-        return func(np.array(x).reshape(1, -1))[0, 0]
+        return -func(np.array(x).reshape(1, -1))[0, 0]
 
     # Convert constraint functions g(x) ≤ 0 to scipy style
     constraints = [{"type": "ineq", "fun": lambda x, g=g: -g(np.array(x).reshape(1, -1))[0]} for g in cons_fns]
@@ -532,7 +547,7 @@ def conduct_experiment(problem, n_runs=10, dim=2):
     results = {}
 
     # === Step 1: Identify feasible minimum ===
-    feasible_x, feasible_y = find_feasible_minimum(problem, dim)
+    feasible_x, feasible_y = find_feasible_maximum(problem, dim)
     print(f"Feasible minimum for {problem}: f(x*) = {feasible_y:.5f} at {feasible_x}")
 
     # === Step 2: Run experiments for all acq types ===
@@ -543,7 +558,7 @@ def conduct_experiment(problem, n_runs=10, dim=2):
         elapsed = time.time() - start
 
         # Compute regret (raw - feasible min)
-        mean_regret = mean_raw - feasible_y
+        mean_regret = feasible_y- mean_raw
         std_regret = std_raw  # same std applies numerically to regret
 
         # Compute separate positive/negative std for asymmetric uncertainty visualization
@@ -602,7 +617,7 @@ def conduct_experiment(problem, n_runs=10, dim=2):
 
 if __name__ == "__main__":
     # 3D experiments
-    #conduct_experiment(problem="hartmann3_tunnel", n_runs=10, dim=3)
-    conduct_experiment(problem="ackley3_shell", n_runs=10, dim=3)
+    conduct_experiment(problem="branin_easy_circle", n_runs=1, dim=2)
+    #conduct_experiment(problem="ackley3_shell", n_runs=10, dim=3)
     #conduct_experiment(problem="rosenbrock3_tunnel", n_runs=10, dim=3)
     #conduct_experiment(problem="levy3_shell", n_runs=10, dim=3)
