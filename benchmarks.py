@@ -3,6 +3,7 @@ import numpy as np
 # =========
 # Objectives (return shape (-1,1); inputs X in [0,1]^d)
 # =========
+from scipy.optimize import minimize
 
 def branin_2d(X):
     X = np.atleast_2d(X)
@@ -226,3 +227,26 @@ BENCHMARKS = {
 }
 
 
+def find_feasible_maximum(problem, dim):
+    """Find feasible minimum for a benchmark using constrained optimization."""
+    func, cons_fns = BENCHMARKS[problem]
+    cons_fns = expand_constraints(cons_fns)
+
+    # Objective wrapper
+    def obj(x):
+        return -func(np.array(x).reshape(1, -1))[0, 0]
+
+    # Convert constraint functions g(x) ≤ 0 to scipy style
+    constraints = [{"type": "ineq", "fun": lambda x, g=g: -g(np.array(x).reshape(1, -1))[0]} for g in cons_fns]
+
+    # Try several starting points (since many problems are nonconvex)
+    best_val = np.inf
+    best_x = None
+    for _ in range(50):
+        x0 = np.random.rand(dim)
+        res = minimize(obj, x0, bounds=[(0, 1)] * dim, constraints=constraints, method="SLSQP", options={"maxiter": 500})
+        if res.success and res.fun < best_val:
+            best_val = res.fun
+            best_x = res.x
+
+    return best_x.tolist(), float(best_val)
