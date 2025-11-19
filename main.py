@@ -190,7 +190,7 @@ def conduct_comparison_experiment(problem, n_runs=10, dim=2):
     plt.tight_layout()
     plt.savefig(os.path.join(problem, f"{problem}_regret_all_variants.png"), dpi=150)
 
-conduct_comparison_experiment("branin_easy_circle", n_runs=1)
+conduct_comparison_experiment("branin_easy_circle", n_runs=5)
 
 
 
