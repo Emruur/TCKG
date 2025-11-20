@@ -1,19 +1,217 @@
 import numpy as np
-from benchmarks import BENCHMARKS, expand_constraints, find_feasible_maximum
 from BayesianOptimizer import BayesianOptimizer
 import os
 import json
 import matplotlib.pyplot as plt
-
+import cocoex
 import warnings
 from sklearn.exceptions import ConvergenceWarning
 warnings.filterwarnings("ignore", category=ConvergenceWarning)
 warnings.filterwarnings("ignore", message=".*lbfgs failed to converge.*")
 
-def run_experiment(problem, acq_type="cei" ,n_runs=1, visualize= True, dim= 2, scei_params= None):
+
+from scipy.optimize import minimize
+import numpy as np
+import cocoex
+
+import numpy as np
+
+def find_feasible_maximum_grid(func, cons_fns, dim, num_points_per_dim=200, tolerance=0):
+    """
+    Finds the feasible maximum using a uniform grid search.
     
-    obj, cons = BENCHMARKS[problem]
-    cons = expand_constraints(cons)
+    Args:
+        func (callable): The objective function (maximization target).
+        cons_fns (list): List of constraint functions (g(x) <= 0 is feasible).
+        dim (int): Dimensionality of the problem.
+        num_points_per_dim (int): Number of grid points along each dimension.
+        tolerance (float): Numerical tolerance for the constraint check (g(x) <= tolerance).
+
+    Returns:
+        tuple: (best_x_list, best_y_value).
+    """
+    
+    # 1. Generate the Grid
+    # Create an array of coordinates for each dimension
+    linspaces = [np.linspace(0, 1, num_points_per_dim) for _ in range(dim)]
+    
+    # Use meshgrid to get all combinations, then reshape to (N_total, dim)
+    grid_coords = np.meshgrid(*linspaces, indexing='ij')
+    X_grid = np.vstack([x.ravel() for x in grid_coords]).T
+    
+    # 2. Evaluate Feasibility on the Grid
+    feasible_indices = np.arange(X_grid.shape[0])
+    
+    # Check each constraint function
+    for g in cons_fns:
+        # g is expected to take a batch (N, D) and return a 1D array (N,)
+        g_values = g(X_grid[feasible_indices])
+        
+        # Identify points that violate the constraint (g(x) > tolerance)
+        # We only keep points where g(x) <= tolerance
+        is_feasible = g_values <= tolerance
+        
+        # Filter the indices to only include feasible points remaining
+        feasible_indices = feasible_indices[is_feasible]
+        
+        # Early break if no points are feasible
+        if len(feasible_indices) == 0:
+            break
+
+    # 3. Evaluate Objective Function for Feasible Points
+    
+    if len(feasible_indices) == 0:
+        print("Warning: Grid search found no feasible points.")
+        # Return center of domain and negative infinity for max value
+        return np.full(dim, 0.5).tolist(), -np.inf
+    
+    # Get the subset of feasible points
+    X_feasible = X_grid[feasible_indices]
+    
+    # Evaluate the objective function on the feasible subset
+    Y_feasible = func(X_feasible) 
+    
+    # 4. Find the Maximum
+    
+    best_index_in_subset = np.argmax(Y_feasible)
+    best_x = X_feasible[best_index_in_subset]
+    best_y = Y_feasible[best_index_in_subset].item()
+    
+    print(f"Grid search completed. Found {len(X_feasible)} feasible points out of {X_grid.shape[0]}.")
+
+    return best_x.tolist(), float(best_y)
+
+def find_feasible_maximum(func, cons_fns, dim):
+    """Find feasible minimum for a benchmark using constrained optimization."""
+
+
+    # Objective wrapper
+    def obj(x):
+        return -func(np.array(x).reshape(1, -1))[0]
+
+    # Convert constraint functions g(x) ≤ 0 to scipy style
+    constraints = [{"type": "ineq", "fun": lambda x, g=g: -g(np.array(x).reshape(1, -1))[0]} for g in cons_fns]
+
+    # Try several starting points (since many problems are nonconvex)
+    best_val = np.inf
+    best_x = None
+    for _ in range(50):
+        x0 = np.random.rand(dim)
+        res = minimize(obj, x0, bounds=[(0, 1)] * dim, constraints=constraints, method="SLSQP", options={"maxiter": 500})
+        if res.success and res.fun < best_val:
+            best_val = res.fun
+            best_x = res.x
+
+    print("Constraints: ", )
+    return best_x.tolist(), -float(best_val)
+
+
+class BBOBWrapper:
+    """
+    Wrapper class to interface the cocoex bbob-constrained problems 
+    with the BayesianOptimizer class.
+
+    It dynamically handles initialization, objective, constraints, and scaling
+    from [0, 1]^n (BO domain) to the problem's defined search space [L, U]^n.
+    """
+
+    def __init__(self, problem_id, instance_id=1, dimension=2, observer=None):
+        
+        # COCO requires a string definition for the suite
+        suite_name = 'bbob-constrained'
+        filter_options = (
+            f'function_indices:{problem_id}'
+            f' instance_indices:{instance_id}'
+            f' dimensions:{dimension}'
+        )
+
+        suite = cocoex.Suite(suite_name, "", filter_options)
+        
+        # Get the single problem instance defined by the filters
+        self.problem = suite.get_problem(0)
+        
+        if observer is not None:
+            self.problem.observe_with(observer)
+
+        self.dimension = self.problem.dimension
+        self.problem_id = problem_id
+        self.instance_id = instance_id
+
+        # --- Dynamic Bound Lookup ---
+        # The COCO problems define their search space on [problem.lower_bound, problem.upper_bound]^n
+        # These are usually -5 and 5, but we retrieve them programmatically.
+        self.lower_bound = self.problem.lower_bounds[0]
+        self.upper_bound = self.problem.upper_bounds[1]
+        
+        print(self.problem.lower_bounds)
+        print(self.problem.lower_bounds)
+        
+        self.range_size = self.upper_bound - self.lower_bound
+        
+        print(f"COCO problem search space bounds: [{self.lower_bound}, {self.upper_bound}]")
+
+
+    def unscale(self, X_unit):
+        """
+        Transforms points X from the BO domain [0, 1]^n to the COCO domain [L, U]^n.
+        X_unit: numpy array, shape (N, D) or (D,)
+        """
+        # X = L + X_unit * (U - L)
+        X = self.lower_bound + X_unit * self.range_size
+        return X
+
+    def get_func(self):
+        """Returns the objective function f(x) callable."""
+        
+        def objective(X_unit):
+            X = self.unscale(X_unit)
+            
+            # The COCO problem requires a 1D array (single point) input.
+            
+            if X.ndim == 1:
+                # Single point input (e.g., from minimize):
+                # We return a 1D array of shape (1,) to match the batch style.
+                return np.array([-self.problem(X)])
+            
+            else:
+                # Array of points input (e.g., from BO loop):
+                # Returns an array of results, shape (N,)
+                return np.array([-self.problem(x) for x in X])
+
+        return objective
+
+    def get_constraints(self):
+        """Returns a list of constraint functions [c1(x), c2(x), ...] callables."""
+        
+        num_constraints = self.problem.number_of_constraints
+        print("NUM CONSTRAINTS", num_constraints)
+        constraint_functions = []
+
+        for k in range(num_constraints):
+            
+            # Define a function for the k-th constraint
+            def constraint_k(X_unit, k=k):
+                X = self.unscale(X_unit)
+
+                # The COCO problem returns a vector of all constraint values
+                if X.ndim == 1:
+                    # single point
+                    all_constraints = self.problem.constraint(X)
+                    return all_constraints[k]
+                else:
+                    # array of points (must loop)
+                    results = []
+                    for x in X:
+                        all_constraints = self.problem.constraint(x)
+                        results.append(all_constraints[k])
+                    return np.array(results)
+
+            constraint_functions.append(constraint_k)
+
+        return constraint_functions
+    
+def run_experiment(problem, obj,cons,acq_type="cei" ,n_runs=1, visualize= True, dim= 2, scei_params= None):
+    
     all_progress = []
     
     init_points= 5
@@ -90,7 +288,8 @@ def conduct_comparison_experiment(problem, n_runs=10, dim=2):
     os.makedirs(output_dir, exist_ok=True)
     results = {}
 
-    feasible_x, feasible_y = find_feasible_maximum(problem, dim)
+    
+    feasible_x, feasible_y = find_feasible_maximum(obj,cons, dim)
     print(f"Feasible Maximum for {problem}: f(x*) = {feasible_y:.5f} at {feasible_x}")
 
     # === Define Acquisition List ===
@@ -283,7 +482,7 @@ def conduct_comparison_experiment(problem, n_runs=10, dim=2):
 # Helper class to serialize numpy floats to standard JSON floats
 
     
-def conduct_experiment(problem, n_runs=10, dim=2):
+def conduct_experiment(problem, n_runs=10, dim=2, visualize= True):
     """
     Compares CEI and a fixed-parameter SCEI (k=13, alpha=0.6) performance 
     on a constrained maximization problem, plotting both symmetric and 
@@ -293,7 +492,24 @@ def conduct_experiment(problem, n_runs=10, dim=2):
     results = {}
 
     # === Step 1: Identify feasible maximum ===
-    feasible_x, feasible_y = find_feasible_maximum(problem, dim)
+    # --- Setup Parameters ---
+    PROBLEM_ID = 4  # e.g., fsphere
+
+    INSTANCE= 1
+
+    # --- Initialize the COCO Wrapper ---
+    coco_wrapper = BBOBWrapper(
+        problem_id=PROBLEM_ID,
+        dimension=dim,
+        instance_id=INSTANCE,  # Use instance 1 for consistency
+        # Optionally pass a cocoex.Observer here if you want full COCO benchmarking
+    )
+
+    # --- Get the Objective and Constraints from the Wrapper ---
+    obj = coco_wrapper.get_func()
+    cons = coco_wrapper.get_constraints()
+    # TODO am i fckng buddy
+    feasible_x, feasible_y = find_feasible_maximum_grid(obj,cons, dim)
     print(f"Feasible Maximum for {problem}: f(x*) = {feasible_y:.5f} at {feasible_x}")
 
     # === Step 2: Run experiments for all acq types ===
@@ -308,7 +524,7 @@ def conduct_experiment(problem, n_runs=10, dim=2):
         }
         
         # Run experiment
-        mean_raw, std_raw, all_runs = run_experiment(problem ,acq_type=acq, n_runs=n_runs, visualize= False ,dim=dim, scei_params= scei_params)
+        mean_raw, std_raw, all_runs = run_experiment(problem,obj,cons ,acq_type=acq, n_runs=n_runs, visualize= visualize ,dim=dim, scei_params= scei_params)
 
         # Compute regret: Regret = f(x*) - f(x) for maximization
         mean_regret = feasible_y - mean_raw
@@ -384,7 +600,7 @@ def conduct_experiment(problem, n_runs=10, dim=2):
     
 #conduct_comparison_experiment("branin_wavy", n_runs=5)
 
-conduct_experiment("hartmann3_tunnel", n_runs=1, dim= 3)
+conduct_experiment("hhas", n_runs=3, dim= 2)
 
 
 

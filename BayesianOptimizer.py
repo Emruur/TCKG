@@ -32,7 +32,7 @@ class BayesianOptimizer:
             self.X_train = np.linspace(0, 1, init_points).reshape(-1, 1)
 
         elif self.dim == 2:
-            self.grid_n = 25
+            self.grid_n = 100
             sampler = qmc.LatinHypercube(d=self.dim, seed=seed)
             self.X_train = sampler.random(n=init_points)
 
@@ -94,19 +94,21 @@ class BayesianOptimizer:
 
     # --- GP fit helper ---
     def _fit_gp(self, X, y):
-        # TODO why am i buggy (convergence error)
-        kernel = C(1.0, (1e-3, 10)) * RBF(length_scale=0.3,
-                                          length_scale_bounds=(1e-2, 10))
-        gp = GaussianProcessRegressor(kernel=kernel, alpha=1e-10,
-                                      normalize_y=True, random_state=0,
-                                      n_restarts_optimizer=3)
+        # FIX: Increased alpha for stability, adjusted length_scale_bounds to prevent overfitting
+        kernel = C(1.0, (1e-2, 100)) * RBF(length_scale=0.5, length_scale_bounds=(0.05, 2))
+        gp = GaussianProcessRegressor(kernel=kernel, alpha=1e-6, 
+                                      normalize_y=True, random_state=self.seed, 
+                                      n_restarts_optimizer=5)
         gp.fit(X, y)
         return gp
 
     def _visualize(self, gpr_obj, gpr_cons, acq_values, x_next, step, folder="figures"):
         """
-        Save visualization plots for objective, constraint, and acquisition function.
-        Works for both 1D and 2D cases.
+        Visualization: 
+        - Plot 1: True objective with infeasible regions faded out.
+        - Plot 2: GP Objective Mean.
+        - Plot 3: GP Probability of Feasibility.
+        - Plot 4: Acquisition Function.
         """
         os.makedirs(folder, exist_ok=True)
         fname = os.path.join(folder, f"step_{step+1:02d}.png")
@@ -118,58 +120,85 @@ class BayesianOptimizer:
             X1 = self.X_grid[:, 0].reshape(n, n)
             X2 = self.X_grid[:, 1].reshape(n, n)
 
-            mu, _ = gpr_obj.predict(self.X_grid, return_std=True)
-            mu = mu.reshape(n, n)
+            # 1. Predict Objective
+            mu_obj, _ = gpr_obj.predict(self.X_grid, return_std=True)
+            mu_obj = mu_obj.reshape(n, n)
 
-            mu_c, _ = gpr_cons[0].predict(self.X_grid, return_std=True)
-            mu_c = mu_c.reshape(n, n)
+            # 2. Calculate True Feasibility (Boolean Mask)
+            # feasible = True where ALL constraints <= 0
+            true_constraints_evaluated = np.array([con(self.X_grid) for con in self.constraints])
+            true_feasible_mask = np.all(true_constraints_evaluated <= 0, axis=0).reshape(n, n)
+            
+            # Create INFEASIBLE mask (1 where infeasible, 0 where feasible)
+            # We will use this to plot the white overlay
+            true_infeasible_mask = (~true_feasible_mask).astype(float)
 
+            # 3. Calculate GP-predicted Probability of Feasibility
+            PF_gp_flat = np.ones(len(self.X_grid))
             for gpr in gpr_cons:
-                mu_c, std_c = gpr.predict(self.X_grid, return_std=True)
-                std_c = np.maximum(std_c, 1e-9)  # avoid divide-by-zero
-                PF_i = norm.cdf((0 - mu_c) / std_c)
-                PF *= PF_i
+                mu_c_gp, std_c_gp = gpr.predict(self.X_grid, return_std=True)
+                std_c_gp = np.maximum(std_c_gp, 1e-9)
+                PF_gp_i = norm.cdf((0 - mu_c_gp) / std_c_gp)
+                PF_gp_flat *= PF_gp_i
+            PF_gp_map = PF_gp_flat.reshape(n, n)
 
-            PF = PF.reshape(n, n)
+            # 4. Evaluate True Objective Function
             true_y = self.func(self.X_grid).reshape(n, n)
-            true_c = self.constraints[0](self.X_grid).reshape(n, n)
 
+            # 5. Acquisition Map
             acq_map = acq_values.reshape(n, n)
 
+            # --- PLOTTING ---
             fig, axes = plt.subplots(2, 2, figsize=(12, 10))
 
-            # (1) True function + feasible region
+            # =================================================================
+            # (1) True function (Infeasible Faded)
+            # =================================================================
+            # A. Plot the full function first
             im1 = axes[0, 0].contourf(X1, X2, true_y, 30, cmap="viridis")
-            cs1 = axes[0, 0].contour(X1, X2, true_c, levels=[0], colors="red", linewidths=2)
-            axes[0, 0].scatter(self.X_train[:, 0], self.X_train[:, 1], color="white", s=20)
-            axes[0, 0].set_title(f"True f(x,y) with Feasibility (Step {step+1})")
+            
+            # B. Overlay White on Infeasible Regions (Alpha controls "fade" amount)
+            # levels=[0.5, 1.5] selects the region where mask == 1 (Infeasible)
+            axes[0, 0].contourf(X1, X2, true_infeasible_mask, levels=[0.5, 1.5], colors='white', alpha=0.7)
+            
+            # C. Plot training points
+            axes[0, 0].scatter(self.X_train[:, 0], self.X_train[:, 1], color="white", edgecolors='k', s=30)
+            axes[0, 0].set_title(f"True f(x) (Feasible Region Highlighted)")
             plt.colorbar(im1, ax=axes[0, 0])
 
-            # (2) Objective GP mean
-            im2 = axes[0, 1].contourf(X1, X2, mu, 30, cmap="viridis")
-            axes[0, 1].scatter(self.X_train[:, 0], self.X_train[:, 1], color="white", s=20)
-            axes[0, 1].set_title("Objective GP Mean")
+
+            # =================================================================
+            # (2) Objective GP Mean
+            # =================================================================
+            im2 = axes[0, 1].contourf(X1, X2, mu_obj, 30, cmap="viridis")
+            axes[0, 1].scatter(self.X_train[:, 0], self.X_train[:, 1], color="white", edgecolors='k', s=30)
+            axes[0, 1].set_title("Objective GP Mean prediction")
             plt.colorbar(im2, ax=axes[0, 1])
 
-            # (3) Constraint GP mean
-            im3 = axes[1, 0].contourf(X1, X2, mu_c, 30, cmap="coolwarm")
-            axes[1, 0].contour(X1, X2, mu_c, levels=[0], colors="black", linewidths=2)
-            axes[1, 0].scatter(self.X_train[:, 0], self.X_train[:, 1], color="white", s=20)
-            axes[1, 0].set_title("Constraint GP Mean")
+            # =================================================================
+            # (3) GP Probability of Feasibility (PF)
+            # =================================================================
+            im3 = axes[1, 0].contourf(X1, X2, PF_gp_map, 30, cmap="Blues", vmin=0, vmax=1)
+            axes[1, 0].contour(X1, X2, PF_gp_map, levels=[0.5], colors="black", linewidths=2, linestyles='--') 
+            axes[1, 0].scatter(self.X_train[:, 0], self.X_train[:, 1], color="white", edgecolors='k', s=30)
+            axes[1, 0].set_title("GP Probability of Feasibility (PF)")
             plt.colorbar(im3, ax=axes[1, 0])
 
-            # (4) Acquisition function
+            # =================================================================
+            # (4) Acquisition Function
+            # =================================================================
             im4 = axes[1, 1].contourf(X1, X2, acq_map, 30, cmap="Greens")
-            axes[1, 1].scatter(self.X_train[:, 0], self.X_train[:, 1], color="white", s=20)
-            axes[1, 1].scatter(x_next[0], x_next[1], color="red", s=50, marker="x", label="Next point")
-            axes[1, 1].set_title("TCKG Acquisition Function")
+            axes[1, 1].scatter(self.X_train[:, 0], self.X_train[:, 1], color="white", edgecolors='k', s=30)
+            if x_next is not None:
+                axes[1, 1].scatter(x_next[0], x_next[1], color="red", s=80, marker="x", label="Next", linewidth=2)
+            axes[1, 1].set_title(f"Acquisition")
             axes[1, 1].legend()
             plt.colorbar(im4, ax=axes[1, 1])
 
             plt.tight_layout()
             plt.savefig(fname, dpi=150)
             plt.close(fig)
-            print(f"[Saved] 2D Visualization for step {step+1} → {fname}")
+            print(f"[Saved] 2D Visualization for step {step+1} -> {fname}")
             
     def run(self, visualize= True, acq_type= "cei", scei_params= None):
         progress= []
@@ -190,7 +219,8 @@ class BayesianOptimizer:
             else:
                 raise ValueError(f"Unknown acq_type {acq_type}")
             
-            x_next, acq_values = self._optimize_acquisition(acq, best_feas)
+            x_next= None
+            #x_next, acq_values = self._optimize_acquisition(acq, best_feas)
             if x_next is None:
                 print("L-BFGS-B failed → using grid.")
                 acq_values = acq.compute(self.candidates, best_feas)
@@ -199,7 +229,8 @@ class BayesianOptimizer:
             
             # Visualization (optional)
             if visualize  and self.dim==2:
-                self._visualize(gp_obj, gp_cons, acq_values, x_next, step, self.problem+"/experiment_"+acq_type+"_"+str(self.seed))
+                visualize_acq_values = acq.compute(self.candidates, best_feas)
+                self._visualize(gp_obj, gp_cons, visualize_acq_values, x_next, step, self.problem+"/experiment_"+acq_type+"_"+str(self.seed))
 
             y_next = self.func(x_next)
             yc_next = [con(x_next) for con in self.constraints]

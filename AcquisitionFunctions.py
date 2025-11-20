@@ -35,7 +35,15 @@ class SigmoidConstrainedEI:
             stds_c.append(std_c)
 
         PF = self.probability_of_feasibility(mus_c, stds_c)
+        
+        # 2. Handle case where no feasible point has been found yet
+        
+        
         activated_PF= sigmoid(PF, self.k, self.alpha)
+        
+        if np.isneginf(best_feas):
+            # If best_feas is -infinity, we strictly maximize the probability of finding a feasible point
+            return activated_PF
         
         improvement= mu_y - best_feas
         Z =  improvement/ (std_y + 1e-12)
@@ -75,6 +83,11 @@ class ConstrainedEI:
             stds_c.append(std_c)
 
         PF = self.probability_of_feasibility(mus_c, stds_c)
+        
+        if np.isneginf(best_feas):
+            # If best_feas is -infinity, we strictly maximize the probability of finding a feasible point
+            return PF
+        
         
         improvement= mu_y - best_feas
         Z =  improvement/ (std_y + 1e-12)
